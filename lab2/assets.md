@@ -1,5 +1,5 @@
 # README
-
+因为不常用c++，把makefile改成了c语言版本，对应是shell.c而不是shell.cpp
 **刘雅兰PB20611825**
 
 #### 一、目录导航
