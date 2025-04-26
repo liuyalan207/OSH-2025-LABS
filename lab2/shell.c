@@ -18,61 +18,6 @@ sigjmp_buf env;
 pid_t bg_pids[100];
 int bg_pid_count = 0;
 
-// 字符串分割函数
-char** split(char* s, const char* delimiter, int* count) {
-    char** tokens = malloc(MAX_ARGS * sizeof(char*));
-    if (tokens == NULL) {
-        perror("malloc failed");
-        exit(EXIT_FAILURE);
-    }
-
-    char* token = strtok(s, delimiter);
-    int i = 0;
-    while (token != NULL && i < MAX_ARGS - 1) { // 防止越界
-        tokens[i++] = token;
-        token = strtok(NULL, delimiter);
-    }
-    tokens[i] = NULL; // 添加结束标志
-    *count = i;
-    return tokens;
-}
-
-// 释放字符串数组
-void free_args(char** args) {
-    if (args != NULL) {
-        free(args);
-    }
-}
-
-// 执行外部命令
-void executeCommand(char** args, int is_background) {
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        perror("fork failed");
-        return;
-    }
-
-    if (pid == 0) {
-        // 子进程
-        if (execvp(args[0], args) == -1) {
-            perror("execvp failed");
-            exit(255);
-        }
-    } else {
-        // 父进程
-        if (!is_background) {
-            int ret = waitpid(pid, NULL, 0);
-            if (ret < 0) {
-                perror("waitpid failed");
-            }
-        } else {
-            bg_pids[bg_pid_count++] = pid;
-            printf("Running in background with PID %d\n", pid);
-        }
-    }
-}
-
 // 内建命令：wait
 void builtin_wait() {
     while (bg_pid_count > 0) {
@@ -141,36 +86,114 @@ void builtin_bg(int pid) {
     printf("Running in background with PID %d\n", pid);
 }
 
+// 内建命令：cd
+void builtin_cd(char** args) {
+    if (args[1] == NULL) {
+        fprintf(stderr, "cd: missing argument\n");
+    } else if (chdir(args[1]) != 0) {
+        perror("cd failed");
+    }
+}
+
+// 内建命令：pwd
+void builtin_pwd() {
+    char cwd[PATH_MAX];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("%s\n", cwd);
+    } else {
+        perror("getcwd failed");
+    }
+}
+
+// 字符串分割函数
+char** split(char* s, const char* delimiter, int* count) {
+    char** tokens = malloc(MAX_ARGS * sizeof(char*));
+    if (tokens == NULL) {
+        perror("malloc failed");
+        exit(EXIT_FAILURE);
+    }
+
+    char* token = strtok(s, delimiter);
+    int i = 0;
+    while (token != NULL && i < MAX_ARGS - 1) { // 防止越界
+        tokens[i++] = token;
+        token = strtok(NULL, delimiter);
+    }
+    tokens[i] = NULL; // 添加结束标志
+    *count = i;
+    return tokens;
+}
+
+// 释放字符串数组
+void free_args(char** args) {
+    if (args != NULL) {
+        free(args);
+        args = NULL; // 防止悬空指针
+    }
+}
+
+// 执行外部命令
+void executeCommand(char** args, int is_background) {
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork failed");
+        return;
+    }
+
+    if (pid == 0) {
+        // 子进程
+        if (execvp(args[0], args) == -1) {
+            perror("execvp failed");
+            exit(255);
+        }
+    } else {
+        // 父进程
+        if (!is_background) {
+            int ret = waitpid(pid, NULL, 0);
+            if (ret < 0) {
+                perror("waitpid failed");
+            }
+        } else {
+            bg_pids[bg_pid_count++] = pid;
+            printf("Running in background with PID %d\n", pid);
+        }
+    }
+}
+
 // 解析重定向
-void ParseRedirection(char** args, int is_background) {
+void ParseRedirection(char** args, int arg_count, int is_background) {
     int fd_in = -1, fd_out = -1, fd_append = -1;
     int i = 0;
 
     // 查找重定向符号
     while (args[i]) {
-        if (strcmp(args[i], "<") == 0) {
+        if (strcmp(args[i], "<") == 0 && i + 1 < arg_count) {
             fd_in = open(args[i + 1], O_RDONLY);
             if (fd_in < 0) {
                 perror("open failed");
-                return;
+                exit(EXIT_FAILURE);
             }
-            args[i] = NULL; // 移除重定向符号和文件名
+            args[i] = NULL; // 移除重定向符号
+            args[i + 1] = NULL; // 移除文件名
             i += 2;
-        } else if (strcmp(args[i], ">") == 0) {
+        } else if (strcmp(args[i], ">") == 0 && i + 1 < arg_count) {
             fd_out = open(args[i + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd_out < 0) {
                 perror("open failed");
-                return;
+                exit(EXIT_FAILURE);
             }
-            args[i] = NULL; // 移除重定向符号和文件名
+            args[i] = NULL; // 移除重定向符号
+            args[i + 1] = NULL; // 移除文件名
             i += 2;
-        } else if (strcmp(args[i], ">>") == 0) {
+        } else if (strcmp(args[i], ">>") == 0 && i + 1 < arg_count) {
             fd_append = open(args[i + 1], O_WRONLY | O_CREAT | O_APPEND, 0644);
             if (fd_append < 0) {
                 perror("open failed");
-                return;
+                exit(EXIT_FAILURE);
             }
-            args[i] = NULL; // 移除重定向符号和文件名
+            args[i] = NULL; // 移除重定向符号
+            args[i + 1] = NULL; // 移除文件名
             i += 2;
         } else {
             i++;
@@ -198,27 +221,8 @@ void ParseRedirection(char** args, int is_background) {
     executeCommand(args, is_background);
 }
 
-// 内建命令：cd
-void builtin_cd(char** args) {
-    if (args[1] == NULL) {
-        fprintf(stderr, "cd: missing argument\n");
-    } else if (chdir(args[1]) != 0) {
-        perror("cd failed");
-    }
-}
-
-// 内建命令：pwd
-void builtin_pwd() {
-    char cwd[PATH_MAX];
-    if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        printf("%s\n", cwd);
-    } else {
-        perror("getcwd failed");
-    }
-}
-
 // 处理管道
-void handlePipes(char** commands[], int num_commands) {
+void handlePipes(char** commands[], int num_commands,int arg_count) {
     int pipes[num_commands - 1][2];
     pid_t pids[num_commands];
 
@@ -255,10 +259,22 @@ void handlePipes(char** commands[], int num_commands) {
                 close(pipes[j][1]);
             }
 
-            // 执行命令
-            execvp(commands[i][0], commands[i]);
-            perror("execvp failed");
-            exit(255);
+            // 检查当前命令是否有重定向符号
+            int has_redirection = 0;
+            for (int j = 0; commands[i][j]; j++) {
+                if (strcmp(commands[i][j], "<") == 0 || strcmp(commands[i][j], ">") == 0 || strcmp(commands[i][j], ">>") == 0) {
+                    has_redirection = 1;
+                    break;
+                }
+            }
+
+            if (has_redirection) {
+                ParseRedirection(commands[i], arg_count, 0);
+            } else {
+                executeCommand(commands[i], 0);
+            }
+
+            exit(0);
         }
     }
 
@@ -293,7 +309,7 @@ void setupSignalHandling() {
 
 int main() {
     setupSignalHandling(); // 设置信号处理
-    char**args; 
+    char** args = NULL; 
     char cmd[MAX_CMD_LENGTH]; // 用来存储读入的一行命令
     while (1) {
         if (sigsetjmp(env, 1) == 0) { // 设置跳转点
@@ -307,10 +323,14 @@ int main() {
 
             int arg_count;
             args = split(cmd, " ", &arg_count); // 按空格分割命令为单词
+            if (args == NULL) {
+                continue; // 如果分配失败，跳过后续处理
+            }
 
             // 没有可处理的命令
             if (arg_count == 0) {
                 free_args(args);
+                args = NULL;
                 continue;
             }
 
@@ -322,7 +342,7 @@ int main() {
                 arg_count--;
             }
 
-            // 内建命令：exit
+            // 检查是否是内建命令
             if (strcmp(args[0], "exit") == 0) {
                 if (arg_count <= 1) {
                     free_args(args);
@@ -336,40 +356,25 @@ int main() {
                     free_args(args);
                     return code;
                 }
-            }
-
-            // 内建命令：wait
-            if (strcmp(args[0], "wait") == 0) {
+            } else if (strcmp(args[0], "wait") == 0) {
                 builtin_wait();
                 free_args(args);
                 continue;
-            }
-
-            // 内建命令：fg
-            if (strcmp(args[0], "fg") == 0) {
+            } else if (strcmp(args[0], "fg") == 0) {
                 int pid = (arg_count == 2) ? atoi(args[1]) : -1;
                 builtin_fg(pid);
                 free_args(args);
                 continue;
-            }
-
-            // 内建命令：bg
-            if (strcmp(args[0], "bg") == 0) {
+            } else if (strcmp(args[0], "bg") == 0) {
                 int pid = (arg_count == 2) ? atoi(args[1]) : -1;
                 builtin_bg(pid);
                 free_args(args);
                 continue;
-            }
-
-            // 内建命令：cd
-            if (strcmp(args[0], "cd") == 0) {
+            } else if (strcmp(args[0], "cd") == 0) {
                 builtin_cd(args);
                 free_args(args);
                 continue;
-            }
-
-            // 内建命令：pwd
-            if (strcmp(args[0], "pwd") == 0) {
+            } else if (strcmp(args[0], "pwd") == 0) {
                 builtin_pwd();
                 free_args(args);
                 continue;
@@ -377,7 +382,7 @@ int main() {
 
             // 检查是否包含管道符号
             int has_pipe = 0;
-            for (int i = 0; args[i]; i++) {
+            for (int i = 1; i < arg_count; i++) { // 从1开始，跳过命令名
                 if (strcmp(args[i], "|") == 0) {
                     has_pipe = 1;
                     break;
@@ -400,7 +405,7 @@ int main() {
                 commands[command_count++] = &args[start];
 
                 // 处理管道
-                handlePipes(commands, command_count);
+                handlePipes(commands, command_count,arg_count);
             } else {
                 // 检查是否包含重定向符号
                 int has_redirection = 0;
@@ -412,17 +417,25 @@ int main() {
                 }
 
                 if (has_redirection) {
-                    ParseRedirection(args, is_background);
+                    ParseRedirection(args, arg_count, is_background);
                 } else {
                     executeCommand(args, is_background);
                 }
             }
+
+            // 释放动态分配的内存
+            free_args(args);
+            args = NULL;
         } else {
             // 如果捕获到 SIGINT 信号，重新显示提示符
             printf("\n");
-        }
 
-        free_args(args); // 释放动态分配的内存
+            // 确保 args 已经被释放
+            if (args != NULL) {
+                free_args(args);
+                args = NULL;
+            }
+        }
     }
     return 0;
 }
