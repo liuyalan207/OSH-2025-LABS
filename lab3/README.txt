@@ -28,21 +28,18 @@ HTTP请求解析
 编译方法
 进入源代码所在目录：
 
-Bash
-深色版本
+
 cd ./lab3/src
 编译源代码生成名为server的可执行文件：
 
-Bash
-深色版本
+
 gcc server.c -o server -lpthread
 运行方法
 同样地，在源代码目录下执行以下命令启动服务器：
 
-Bash
-深色版本
-./server &
-注意：使用&符号可以让服务器在后台运行，方便在同一终端窗口中进行其他操作，比如使用curl或siege进行测试。
+
+./server 
+
 
 ###5. 使用 Siege 测试的结果和分析
 不支持http1.1协议，无法测试
